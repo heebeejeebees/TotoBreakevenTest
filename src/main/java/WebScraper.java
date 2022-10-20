@@ -1,6 +1,7 @@
 import com.gargoylesoftware.htmlunit.BrowserVersion;
 import com.gargoylesoftware.htmlunit.WebClient;
 import com.gargoylesoftware.htmlunit.html.*;
+import java.text.MessageFormat;
 import org.apache.commons.logging.LogFactory;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -84,6 +85,9 @@ public class WebScraper {
             System.out.println("Utilizing " + coreCount + " threads...");
             ExecutorService service = Executors.newFixedThreadPool(coreCount);
 
+            // running time
+            long startTime = System.nanoTime();
+
             try {
                 webClient.getOptions().setThrowExceptionOnScriptError(false);
 
@@ -120,24 +124,21 @@ public class WebScraper {
 
                 System.out.println("Scanning " + boardCounter + " pages online...");
 
-                //multithreaded website scraping
-                for (int x = 1; x <= boardCounter.get(); x++) {
-                    service.submit(new scrapperFunction());
-                }
-
                 //countdownlatch to prevent main thread from finishing calculation BEFORE data is tabulated
                 CountDownLatch latch = new CountDownLatch(coreCount);
 
-                class countDownLatch implements Runnable {
-
-                    @Override
-                    public void run() {
-                        latch.countDown();
-                    }
-                }
-
-                for (int x = 0; x < coreCount; x++) {
-                    service.submit(new countDownLatch());
+                //multithreaded website scraping
+                for (int x = 1; x <= coreCount; x++) {
+                    service.submit(() -> {
+                        try {
+                            scrapperFunction();
+                            latch.countDown();
+                        } catch ( NullPointerException | IOException e) {
+                            boardCounter.decrementAndGet();
+                            faultyLinks.incrementAndGet();
+                            Thread.currentThread().interrupt();
+                        }
+                    });
                 }
 
                 latch.await();
@@ -164,6 +165,8 @@ public class WebScraper {
                 boardCounter.decrementAndGet();
                 faultyLinks.incrementAndGet();
             }
+            long endTime = System.nanoTime();
+            System.out.println(MessageFormat.format("Webscraping time elapsed: {0}s", TimeUnit.SECONDS.convert(endTime - startTime, TimeUnit.NANOSECONDS)));
         }
                 System.out.println("The average chance of Toto Prize Snowballing is " + totoData.get("avgTotoSnowball") + "%");
                 for (int x = 1; x < 8; x++) {
@@ -172,12 +175,9 @@ public class WebScraper {
     }
 
 
-    public class scrapperFunction implements Runnable {
+    public void scrapperFunction () throws NullPointerException, IOException {
 
-        @Override
-        public void run() {
             //adding the statistics
-            try {
                 doc = Jsoup.connect(websiteData.get(testCounter.incrementAndGet())).get();
                 data = doc.selectFirst("div.desc");
 
@@ -205,10 +205,6 @@ public class WebScraper {
                         totoData.merge("avgGrp7Winners", tempFloat, Float::sum);
                     }
                 }
-            } catch (NullPointerException | IOException npe) {
-                boardCounter.decrementAndGet();
-                faultyLinks.incrementAndGet();
-            }
         }
-    }
+
 }
